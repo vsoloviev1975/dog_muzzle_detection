@@ -1,0 +1,12 @@
+ultralytics
+fastapi
+uvicorn
+sqlalchemy
+python-multipart
+reportlab
+pillow
+opencv-python
+numpy
+onnx
+onnxruntime
+onnxslim

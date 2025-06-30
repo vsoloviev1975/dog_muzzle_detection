@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Детекция собак без намордников</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <meta charset="UTF-8">
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>Детекция собак без намордников</h1>
+        </div>
+    </div>
+
+    <div class="container">
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="file" id="fileInput" accept="image/*,video/*" required>
+            <button type="submit">Анализировать</button>
+        </form>
+        
+        <div class="result-container">
+            <h2>Результаты:</h2>
+            <div id="mediaContainer">
+                <canvas id="resultCanvas"></canvas>
+                <video id="resultVideo" controls style="display:none; max-width:100%"></video>
+            </div>
+            <div id="resultText"></div>
+            <a id="pdfLink" style="display:none;" class="report-button">Скачать отчет PDF</a>
+            <a id="videoReportLink" style="display:none; margin-left:10px;" class="report-button">Скачать видео-отчет</a>
+        </div>
+
+        <div class="history-container">
+            <h2>История проверок</h2>
+            <button id="generateReportBtn" class="report-button">Создать отчет по всей БД</button>
+            <div id="historyList" class="history-list"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', loadHistory);
+
+        async function loadHistory() {
+            try {
+                const response = await fetch('/api/history/');
+                if (!response.ok) {
+                    throw new Error('Ошибка загрузки истории');
+                }
+                const data = await response.json();
+                renderHistory(data.items);
+            } catch (error) {
+                console.error('Error loading history:', error);
+                alert('Ошибка загрузки истории: ' + error.message);
+            }
+        }
+
+        function renderHistory(items) {
+            const historyList = document.getElementById('historyList');
+            historyList.innerHTML = '';
+
+            if (items.length === 0) {
+                historyList.innerHTML = '<p>Нет данных для отображения</p>';
+                return;
+            }
+
+            items.forEach(item => {
+                const historyItem = document.createElement('div');
+                historyItem.className = `history-item ${item.has_no_muzzle ? 'danger' : 'safe'}`;
+                
+                // Определяем тип медиа и создаем соответствующий элемент
+                let mediaElement;
+                if (item.is_video) {
+                    mediaElement = document.createElement('video');
+                    mediaElement.src = `/api/images/${item.filename}`;
+                    mediaElement.controls = true;
+                } else {
+                    mediaElement = document.createElement('img');
+                    mediaElement.src = `/api/images/${item.filename}`;
+                    mediaElement.alt = item.filename;
+                }
+
+                const mediaContainer = document.createElement('div');
+                mediaContainer.className = 'history-preview';
+                mediaContainer.appendChild(mediaElement);
+
+                const infoContainer = document.createElement('div');
+                infoContainer.className = 'history-info';
+                
+                const fileName = document.createElement('p');
+                fileName.textContent = item.filename;
+                
+                const date = document.createElement('p');
+                date.textContent = new Date(item.created_at).toLocaleString();
+                
+                const status = document.createElement('p');
+                status.textContent = item.has_no_muzzle 
+                    ? '⚠️ Найдены собаки без намордника' 
+                    : '✅ Нарушений не найдено';
+                
+                infoContainer.appendChild(fileName);
+                infoContainer.appendChild(date);
+                infoContainer.appendChild(status);
+
+                // Добавляем ссылку на отчет, если есть
+                if (item.report_url) {
+                    const reportLink = document.createElement('a');
+                    reportLink.href = item.report_url;
+                    reportLink.textContent = 'Отчет PDF';
+                    reportLink.target = '_blank';
+                    infoContainer.appendChild(reportLink);
+                }
+
+                historyItem.appendChild(mediaContainer);
+                historyItem.appendChild(infoContainer);
+                historyList.appendChild(historyItem);
+            });
+        }
+
+        async function uploadImage(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch('/api/upload/', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Ошибка обработки изображения');
+            }
+
+            return await response.json();
+        }
+
+        async function uploadVideo(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch('/api/upload_video/', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Ошибка обработки видео');
+            }
+
+            return await response.json();
+        }
+
+        function displayResults(data, isVideo) {
+            const canvas = document.getElementById('resultCanvas');
+            const video = document.getElementById('resultVideo');
+            const resultText = document.getElementById('resultText');
+            const pdfLink = document.getElementById('pdfLink');
+            const videoReportLink = document.getElementById('videoReportLink');
+
+            // Сбрасываем отображение
+            canvas.style.display = 'none';
+            video.style.display = 'none';
+            pdfLink.style.display = 'none';
+            videoReportLink.style.display = 'none';
+
+            if (isVideo) {
+                // Обработка видео
+                video.src = `/api/images/${data.filename}`;
+                video.style.display = 'block';
+                
+                // Показываем кнопки отчетов
+                if (data.report_url) {
+                    pdfLink.href = data.report_url;
+                    pdfLink.style.display = 'inline-block';
+                    pdfLink.textContent = 'Скачать PDF отчет';
+                    
+                    // Для видео можно добавить дополнительную кнопку
+                    videoReportLink.style.display = 'none'; // или 'inline-block' если есть видео-отчет
+                }
+            } else {
+                // Обработка изображения
+                const ctx = canvas.getContext('2d');
+                const img = new Image();
+                
+                img.onload = function() {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    
+                    // Рисуем bounding boxes для собак без намордников
+                    if (data.results && data.results.dogs_without_muzzle) {
+                        data.results.dogs_without_muzzle.forEach(bbox => {
+                            ctx.strokeStyle = 'red';
+                            ctx.lineWidth = 3;
+                            ctx.strokeRect(bbox[0], bbox[1], bbox[2]-bbox[0], bbox[3]-bbox[1]);
+                            ctx.fillStyle = 'red';
+                            ctx.fillText('No Muzzle', bbox[0], bbox[1]-5);
+                        });
+                    }
+                    
+                    canvas.style.display = 'block';
+                };
+                
+                img.src = `/api/images/${data.filename}`;
+                
+                // Показываем кнопку PDF отчета если он есть
+                if (data.report_url) {
+                    pdfLink.href = data.report_url;
+                    pdfLink.style.display = 'inline-block';
+                    pdfLink.textContent = 'Скачать PDF отчет';
+                }
+            }
+
+            // Устанавливаем текст результата на основе data.has_violations или data.results
+            const hasViolations = data.has_violations !== undefined 
+                ? data.has_violations 
+                : (data.results && data.results.dogs_without_muzzle && data.results.dogs_without_muzzle.length > 0);
+            
+            if (hasViolations) {
+                resultText.innerHTML = '<span class="text-danger">Обнаружены собаки без намордника!</span>';
+            } else {
+                resultText.innerHTML = '<span class="text-success">Нарушений не обнаружено.</span>';
+            }
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Пожалуйста, выберите файл');
+                return;
+            }
+
+            const isVideo = file.type.includes('video');
+            
+            try {
+                const result = isVideo 
+                    ? await uploadVideo(file)
+                    : await uploadImage(file);
+                
+                displayResults(result, isVideo);
+                loadHistory();
+            } catch (error) {
+                console.error('Error:', error);
+                alert(`Ошибка при обработке ${isVideo ? 'видео' : 'изображения'}: ${error.message}`);
+            }
+        });
+
+        // Обработчик для кнопки генерации полного отчета
+        document.getElementById('generateReportBtn').addEventListener('click', async () => {
+            try {
+                // Показываем сообщение о начале генерации
+                alert('Начата генерация полного отчета. Это может занять некоторое время...');
+                
+                const response = await fetch('/api/generate_full_report/');
+                if (!response.ok) {
+                    throw new Error('Ошибка генерации отчета');
+                }
+                const data = await response.json();
+                
+                // Создаем временную ссылку для скачивания
+                const link = document.createElement('a');
+                link.href = data.report_url;
+                link.download = 'full_report.pdf';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                alert('Отчет успешно сгенерирован и будет загружен');
+            } catch (error) {
+                console.error('Error generating report:', error);
+                alert('Ошибка при генерации отчета: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
